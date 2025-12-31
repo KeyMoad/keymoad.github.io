@@ -129,17 +129,22 @@ export const ImageCanvas = forwardRef<HTMLCanvasElement, ImageCanvasProps>(
       const ctx = canvas.getContext("2d", { willReadFrequently: true })
       if (!ctx) return
 
-      const MAX_WIDTH = 720 // Reduced from 1200 to 720 (40% reduction)
-      const MAX_HEIGHT = 480 // Reduced from 800 to 480 (40% reduction)
+      // Get container dimensions
+      const container = canvas.parentElement
+      if (!container) return
+      
+      const containerRect = container.getBoundingClientRect()
+      const MAX_WIDTH = containerRect.width
+      const MAX_HEIGHT = containerRect.height
 
-      // Calculate scale to fit within both width and height constraints
+      // Calculate scale to fill the container while maintaining aspect ratio
       const scaleX = MAX_WIDTH / image.width
       const scaleY = MAX_HEIGHT / image.height
-      const scale = Math.min(1, scaleX, scaleY) // Use smallest scale to fit within both constraints
+      const scale = Math.max(scaleX, scaleY) // Use largest scale to fill container
 
       const dpr = window.devicePixelRatio || 1
-      const displayWidth = image.width * scale
-      const displayHeight = image.height * scale
+      const displayWidth = MAX_WIDTH
+      const displayHeight = MAX_HEIGHT
 
       canvas.width = displayWidth * dpr
       canvas.height = displayHeight * dpr
@@ -151,12 +156,22 @@ export const ImageCanvas = forwardRef<HTMLCanvasElement, ImageCanvasProps>(
       ctx.scale(dpr, dpr)
       ctx.imageSmoothingEnabled = false
 
-      // Draw image in display space
-      ctx.drawImage(image, 0, 0, displayWidth, displayHeight)
+      // Draw image to fill the entire canvas, maintaining aspect ratio
+      const imageScale = Math.max(scaleX, scaleY)
+      const scaledImageWidth = image.width * imageScale
+      const scaledImageHeight = image.height * imageScale
+      const offsetX = (displayWidth - scaledImageWidth) / 2
+      const offsetY = (displayHeight - scaledImageHeight) / 2
+      
+      ctx.drawImage(image, offsetX, offsetY, scaledImageWidth, scaledImageHeight)
 
       // Get image data from the scaled canvas
       const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
       const data = imageData.data
+      
+      // Clear the canvas immediately after extracting data to prevent showing original image
+      ctx.fillStyle = "#020202"
+      ctx.fillRect(0, 0, displayWidth, displayHeight)
 
       for (let i = 0; i < data.length; i += 4) {
         // Apply contrast with clamping to prevent extreme values
@@ -313,6 +328,89 @@ export const ImageCanvas = forwardRef<HTMLCanvasElement, ImageCanvasProps>(
       canvas.addEventListener("mouseenter", handleMouseEnter)
       canvas.addEventListener("mouseleave", handleMouseLeave)
 
+      // Handle resize - update canvas when container size changes
+      let lastWidth = MAX_WIDTH
+      let lastHeight = MAX_HEIGHT
+      
+      const resizeObserver = new ResizeObserver((entries) => {
+        if (!canvasRef.current || !image || !entries[0]) return
+        
+        const { width: newWidth, height: newHeight } = entries[0].contentRect
+        
+        // Only update if size change is significant (more than 5px) to avoid scroll-related flicker
+        const widthDiff = Math.abs(newWidth - lastWidth)
+        const heightDiff = Math.abs(newHeight - lastHeight)
+        
+        if (newWidth > 0 && newHeight > 0 && (widthDiff > 5 || heightDiff > 5)) {
+          lastWidth = newWidth
+          lastHeight = newHeight
+          const newScaleX = newWidth / image.width
+          const newScaleY = newHeight / image.height
+          const newImageScale = Math.max(newScaleX, newScaleY)
+          
+          canvas.width = newWidth * dpr
+          canvas.height = newHeight * dpr
+          canvas.style.width = `${newWidth}px`
+          canvas.style.height = `${newHeight}px`
+          
+          // Reset context and redraw
+          ctx.setTransform(1, 0, 0, 1, 0, 0)
+          ctx.scale(dpr, dpr)
+          ctx.imageSmoothingEnabled = false
+          
+          const scaledImageWidth = image.width * newImageScale
+          const scaledImageHeight = image.height * newImageScale
+          const offsetX = (newWidth - scaledImageWidth) / 2
+          const offsetY = (newHeight - scaledImageHeight) / 2
+          
+          ctx.drawImage(image, offsetX, offsetY, scaledImageWidth, scaledImageHeight)
+          
+          // Regenerate dots for new size
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+          const data = imageData.data
+          
+          // Clear canvas immediately after extracting data
+          ctx.fillStyle = "#020202"
+          ctx.fillRect(0, 0, newWidth, newHeight)
+          
+          const newDots: DotData[] = []
+          const newAdjustedHalftoneSize = Math.max(2, halftoneSize * newImageScale)
+          
+          for (let y = 0; y < newHeight; y += newAdjustedHalftoneSize) {
+            for (let x = 0; x < newWidth; x += newAdjustedHalftoneSize) {
+              const sampleX = Math.floor(x * dpr)
+              const sampleY = Math.floor(y * dpr)
+              const i = (sampleY * canvas.width + sampleX) * 4
+              const brightness = (data[i] + data[i + 1] + data[i + 2]) / 3
+              const dotSize = (brightness / 255) * newAdjustedHalftoneSize * 0.9
+              
+              if (dotSize > 0.5) {
+                const centerX = x + newAdjustedHalftoneSize / 2
+                const centerY = y + newAdjustedHalftoneSize / 2
+                newDots.push({
+                  x: centerX,
+                  y: centerY,
+                  baseX: centerX,
+                  baseY: centerY,
+                  baseSize: dotSize,
+                  brightness,
+                  isAccent: Math.random() < accentProbability && brightness > 150,
+                  sizeMultiplier: 1 + (Math.random() - 0.5) * sizeVariation,
+                  twinklePhase: Math.random() * Math.PI * 2,
+                  twinkleSpeed: 0.02 + Math.random() * 0.03,
+                  vx: 0,
+                  vy: 0,
+                })
+              }
+            }
+          }
+          
+          dotsRef.current = newDots
+        }
+      })
+      
+      resizeObserver.observe(container)
+
       return () => {
         if (animationFrameRef.current) {
           cancelAnimationFrame(animationFrameRef.current)
@@ -320,6 +418,7 @@ export const ImageCanvas = forwardRef<HTMLCanvasElement, ImageCanvasProps>(
         canvas.removeEventListener("mousemove", handleMouseMove)
         canvas.removeEventListener("mouseenter", handleMouseEnter)
         canvas.removeEventListener("mouseleave", handleMouseLeave)
+        resizeObserver.disconnect()
       }
     }, [
       image,
@@ -331,13 +430,14 @@ export const ImageCanvas = forwardRef<HTMLCanvasElement, ImageCanvasProps>(
       returnSpeed,
       accentProbability,
       sizeVariation,
-      isHovering,
     ])
 
     return (
-      <Card className="p-4 bg-black">
-        <canvas ref={canvasRef} className="w-full h-auto cursor-crosshair" />
-      </Card>
+      <canvas 
+        ref={canvasRef} 
+        className="w-full h-full cursor-crosshair block" 
+        style={{ width: '100%', height: '100%' }}
+      />
     )
   },
 )
