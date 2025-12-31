@@ -369,6 +369,8 @@ export default function Home() {
               <p className="text-foreground">
                 Presented Kubernetes networking internals at IRNOG, focusing on CNI mechanics, packet flow, service mesh interactions, and troubleshooting real production scenarios.
               </p>
+              <br />
+              <a href="https://www.youtube.com/watch?v=YSg2ccwXZhE" target="_blank" rel="noopener noreferrer" className="text-primary font-bold">Watch Presentation</a>
             </div>
           </section>
 
