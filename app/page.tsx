@@ -4,7 +4,7 @@ import { useState, useEffect } from "react"
 import { Github, Mail, MessageCircle, Linkedin } from "lucide-react"
 import { ImageCanvas } from "@/components/image-canvas"
 
-const HALFTONE_SIZE = 0.005
+const HALFTONE_SIZE = 0.0001
 const CONTRAST = 1
 const ACCENT_COLOR = "#CECFC7"
 const MOUSE_RADIUS = 100
@@ -22,7 +22,7 @@ export default function Home() {
     img.onload = () => {
       setImage(img)
     }
-    img.src = "/photo.jpg"
+    img.src = "/photo.png"
   }, [])
 
   return (
